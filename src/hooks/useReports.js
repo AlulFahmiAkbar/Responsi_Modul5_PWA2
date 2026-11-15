@@ -2,7 +2,27 @@ import { useEffect, useState } from "react";
 import { readJSON, writeJSON } from "../utils/storage";
 import { supabase } from "../utils/supabase";
 
-const USER_REPORTS_KEY = "temubarang:user_reports:v3";
+const USER_REPORTS_KEY = "temubarang:user_reports:v4";
+const ALL_REPORTS_KEY = "temubarang:all_reports:v4";
+
+// Generate valid UUID to prevent Postgres "invalid input syntax for type uuid" error
+const generateId = () => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  const hex = "0123456789abcdef";
+  let uuid = "";
+  for (let i = 0; i < 36; i++) {
+    if (i === 8 || i === 13 || i === 18 || i === 23) {
+      uuid += "-";
+    } else if (i === 14) {
+      uuid += "4";
+    } else {
+      uuid += hex[Math.floor(Math.random() * 16)];
+    }
+  }
+  return uuid;
+};
 
 export const CATEGORIES = [
   "Dokumen",
@@ -194,14 +214,21 @@ function mapFromSupabase(d) {
 }
 
 function loadInitialReports() {
-  const userSaved = readJSON(USER_REPORTS_KEY, null);
+  // 1. Try loading from all-reports persistent cache
+  const allSaved = readJSON(ALL_REPORTS_KEY, null);
+  if (Array.isArray(allSaved) && allSaved.length > 0) {
+    return allSaved;
+  }
+
+  // 2. Try loading from user reports cache
+  const userSaved = readJSON(USER_REPORTS_KEY, null) || readJSON("temubarang:user_reports:v3", null);
   if (Array.isArray(userSaved) && userSaved.length > 0) {
     const userIds = new Set(userSaved.map((r) => r.id));
     const nonDuplicatedSeeds = SEED_REPORTS.filter((s) => !userIds.has(s.id));
     return [...userSaved, ...nonDuplicatedSeeds];
   }
 
-  // Check legacy reports key
+  // 3. Check legacy reports key
   const legacy = readJSON("temubarang:reports:v2", null);
   if (Array.isArray(legacy) && legacy.length > 0) {
     const seedIds = new Set(SEED_REPORTS.map((s) => s.id));
@@ -219,6 +246,13 @@ export function useReports() {
   const [reports, setReports] = useState(loadInitialReports);
   const [isSyncing, setIsSyncing] = useState(false);
 
+  // Keep all reports in persistent localStorage cache on every state change
+  useEffect(() => {
+    if (Array.isArray(reports) && reports.length > 0) {
+      writeJSON(ALL_REPORTS_KEY, reports);
+    }
+  }, [reports]);
+
   // Sync from Supabase on mount
   useEffect(() => {
     async function fetchSupabaseReports() {
@@ -233,7 +267,7 @@ export function useReports() {
         if (data && !error && data.length > 0) {
           const fromDb = data.map(mapFromSupabase);
 
-          // Merge with local user reports so any newly posted local report is kept
+          // Merge with local user reports so local reports are never lost
           const existingUserReports = readJSON(USER_REPORTS_KEY, []);
           const dbIds = new Set(fromDb.map((r) => r.id));
           const localOnly = existingUserReports.filter((r) => !dbIds.has(r.id));
@@ -244,7 +278,9 @@ export function useReports() {
           // Combine with seed reports
           const allUserIds = new Set(mergedUserReports.map((r) => r.id));
           const seeds = SEED_REPORTS.filter((s) => !allUserIds.has(s.id));
-          setReports([...mergedUserReports, ...seeds]);
+          const combined = [...mergedUserReports, ...seeds];
+          setReports(combined);
+          writeJSON(ALL_REPORTS_KEY, combined);
         }
       } catch (err) {
         console.warn("Supabase reports sync fallback to local:", err);
@@ -256,23 +292,28 @@ export function useReports() {
   }, []);
 
   const create = async (data) => {
+    const newId = generateId();
     const newReport = {
       ...data,
-      id: "rep-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      id: newId,
       reportDate: today(0),
       status: "searching",
     };
 
-    // 1. Instantly update React state so user immediately sees it
-    setReports((prev) => [newReport, ...prev.filter((r) => r.id !== newReport.id)]);
+    // 1. Instantly update React state & write to persistent cache synchronously
+    setReports((prev) => {
+      const updated = [newReport, ...prev.filter((r) => r.id !== newId)];
+      writeJSON(ALL_REPORTS_KEY, updated);
+      return updated;
+    });
 
-    // 2. Instantly persist to localStorage
+    // 2. Persist to dedicated user reports storage
     try {
       const existing = readJSON(USER_REPORTS_KEY, []);
-      const updated = [newReport, ...existing.filter((r) => r.id !== newReport.id)];
-      writeJSON(USER_REPORTS_KEY, updated);
+      const updatedUserReports = [newReport, ...existing.filter((r) => r.id !== newId)];
+      writeJSON(USER_REPORTS_KEY, updatedUserReports);
     } catch (e) {
-      console.warn("Error saving report to localStorage:", e);
+      console.warn("Error saving user report to localStorage:", e);
     }
 
     // 3. Persist to Supabase reports table
@@ -292,9 +333,11 @@ export function useReports() {
   };
 
   const update = async (id, data) => {
-    setReports((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, ...data } : item))
-    );
+    setReports((prev) => {
+      const updated = prev.map((item) => (item.id === id ? { ...item, ...data } : item));
+      writeJSON(ALL_REPORTS_KEY, updated);
+      return updated;
+    });
 
     const existing = readJSON(USER_REPORTS_KEY, []);
     const updated = existing.map((r) => (r.id === id ? { ...r, ...data } : r));
@@ -312,7 +355,11 @@ export function useReports() {
   };
 
   const remove = async (id) => {
-    setReports((prev) => prev.filter((item) => item.id !== id));
+    setReports((prev) => {
+      const updated = prev.filter((item) => item.id !== id);
+      writeJSON(ALL_REPORTS_KEY, updated);
+      return updated;
+    });
 
     const existing = readJSON(USER_REPORTS_KEY, []);
     writeJSON(USER_REPORTS_KEY, existing.filter((r) => r.id !== id));

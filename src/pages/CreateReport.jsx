@@ -110,7 +110,7 @@ export default function CreateReport({ create, initial, onSave }) {
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     const errs = validate(formData);
     setErrors(errs);
@@ -133,11 +133,16 @@ export default function CreateReport({ create, initial, onSave }) {
         : `+62 ${formData.reporterContact.replace(/^0/, "").trim()}`,
     };
 
-    if (onSave) {
-      onSave(cleaned);
-    } else {
-      create(cleaned);
+    try {
+      if (onSave) {
+        await onSave(cleaned);
+      } else {
+        await create(cleaned);
+      }
       navigate("/");
+    } catch (err) {
+      console.error("Gagal menyimpan laporan:", err);
+      setIsSubmitting(false);
     }
   };
 

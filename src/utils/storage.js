@@ -21,12 +21,27 @@ export function writeJSON(key, value) {
         "temubarang:profile:v1",
         "temubarang:profile:v2",
         "temubarang:profile:v3",
+        "temubarang:profile:v4",
       ];
       legacyKeys.forEach((k) => localStorage.removeItem(k));
       localStorage.setItem(key, JSON.stringify(value));
       return true;
     } catch {
-      return false; // Storage benar-benar penuh
+      // Fallback: If still full because array has heavy base64 images,
+      // preserve all report metadata and only strip data: images from older entries
+      if (Array.isArray(value)) {
+        try {
+          const lightweight = value.map((item, idx) => {
+            if (idx > 2 && item.image && item.image.startsWith("data:")) {
+              return { ...item, image: "" };
+            }
+            return item;
+          });
+          localStorage.setItem(key, JSON.stringify(lightweight));
+          return true;
+        } catch {}
+      }
+      return false;
     }
   }
 }
