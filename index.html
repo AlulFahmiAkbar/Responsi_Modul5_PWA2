@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="id" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="color-scheme" content="only light" />
+    <meta name="darkreader-lock" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#2563EB" />
+    <meta name="description" content="TemuBarang: laporkan dan cari barang hilang dan temuan di kampus." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <script>
+      // Force unregister stale PWA Service Workers and clear old cached CSS/JS
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(registrations) {
+          for (var reg of registrations) {
+            reg.unregister();
+          }
+        });
+      }
+      if ('caches' in window) {
+        caches.keys().then(function(names) {
+          for (var name of names) {
+            caches.delete(name);
+          }
+        });
+      }
+      try {
+        localStorage.clear();
+      } catch (e) {}
+      document.documentElement.setAttribute('data-theme', 'light');
+    </script>
+    <style>
+      :root, html, body {
+        background-color: #FAF8FF !important;
+        background: #FAF8FF !important;
+        color: #071747 !important;
+      }
+      .tb-device-viewport, .tb-app-frame {
+        background: #FAF8FF !important;
+        background-color: #FAF8FF !important;
+      }
+      .tb-hero-card {
+        background: transparent !important;
+      }
+      .tb-stat-card {
+        background: #FFFFFF !important;
+      }
+      .tb-search-bar {
+        background: #FFFFFF !important;
+      }
+      .tb-info-banner {
+        background: #EBEDFF !important;
+      }
+      .tb-compact-card, .tb-detailed-card, .tb-form-card {
+        background: #FFFFFF !important;
+      }
+    </style>
+    <title>TemuBarang</title>
+  </head>
+  <body style="background-color: #FFFFFF;">
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
