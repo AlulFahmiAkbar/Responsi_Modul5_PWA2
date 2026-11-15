@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { readJSON, writeJSON } from "../utils/storage";
+import { supabase } from "../utils/supabase";
 
-const KEY = "temubarang:reports:v2";
+const USER_REPORTS_KEY = "temubarang:user_reports:v3";
 
 export const CATEGORIES = [
   "Dokumen",
@@ -150,35 +151,180 @@ export const SEED_REPORTS = [
   },
 ];
 
+function mapToSupabase(r) {
+  return {
+    id: r.id,
+    report_type: r.reportType || "found",
+    item_name: r.itemName || "",
+    category: r.category || "Lainnya",
+    description: r.description || "",
+    location: r.location || "",
+    incident_date: r.incidentDate || today(0),
+    incident_time: r.incidentTime || "00:00",
+    report_date: r.reportDate || today(0),
+    image: r.image || "",
+    reporter_name: r.reporterName || "Civitas Kampus",
+    reporter_nim: r.reporterNim || "",
+    reporter_contact: r.reporterContact || "",
+    hide_contact: Boolean(r.hideContact),
+    status: r.status || "searching",
+    urgent: Boolean(r.urgent),
+  };
+}
+
+function mapFromSupabase(d) {
+  return {
+    id: d.id,
+    reportType: d.report_type || d.reportType || "found",
+    itemName: d.item_name || d.itemName || "",
+    category: d.category || "Lainnya",
+    description: d.description || "",
+    location: d.location || "",
+    incidentDate: d.incident_date || d.incidentDate || "",
+    incidentTime: d.incident_time || d.incidentTime || "",
+    reportDate: d.report_date || d.reportDate || "",
+    image: d.image || "",
+    reporterName: d.reporter_name || d.reporterName || "Civitas Kampus",
+    reporterNim: d.reporter_nim || d.reporterNim || "",
+    reporterContact: d.reporter_contact || d.reporterContact || "",
+    hideContact: Boolean(d.hide_contact ?? d.hideContact),
+    status: d.status || "searching",
+    urgent: Boolean(d.urgent),
+  };
+}
+
+function loadInitialReports() {
+  const userSaved = readJSON(USER_REPORTS_KEY, null);
+  if (Array.isArray(userSaved) && userSaved.length > 0) {
+    const userIds = new Set(userSaved.map((r) => r.id));
+    const nonDuplicatedSeeds = SEED_REPORTS.filter((s) => !userIds.has(s.id));
+    return [...userSaved, ...nonDuplicatedSeeds];
+  }
+
+  // Check legacy reports key
+  const legacy = readJSON("temubarang:reports:v2", null);
+  if (Array.isArray(legacy) && legacy.length > 0) {
+    const seedIds = new Set(SEED_REPORTS.map((s) => s.id));
+    const custom = legacy.filter((r) => !seedIds.has(r.id));
+    if (custom.length > 0) {
+      writeJSON(USER_REPORTS_KEY, custom);
+    }
+    return legacy;
+  }
+
+  return SEED_REPORTS;
+}
+
 export function useReports() {
-  const [reports, setReports] = useState(() => {
-    const saved = readJSON(KEY, null);
-    if (saved && Array.isArray(saved) && saved.length > 0) return saved;
-    return SEED_REPORTS;
-  });
+  const [reports, setReports] = useState(loadInitialReports);
+  const [isSyncing, setIsSyncing] = useState(false);
 
+  // Sync from Supabase on mount
   useEffect(() => {
-    writeJSON(KEY, reports);
-  }, [reports]);
+    async function fetchSupabaseReports() {
+      if (!supabase) return;
+      try {
+        setIsSyncing(true);
+        const { data, error } = await supabase
+          .from("reports")
+          .select("*")
+          .order("report_date", { ascending: false });
 
-  const create = (data) =>
-    setReports((prev) => [
-      {
-        ...data,
-        id: "rep-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-        reportDate: today(0),
-        status: "searching",
-      },
-      ...prev,
-    ]);
+        if (data && !error && data.length > 0) {
+          const fromDb = data.map(mapFromSupabase);
 
-  const update = (id, data) =>
+          // Merge with local user reports so any newly posted local report is kept
+          const existingUserReports = readJSON(USER_REPORTS_KEY, []);
+          const dbIds = new Set(fromDb.map((r) => r.id));
+          const localOnly = existingUserReports.filter((r) => !dbIds.has(r.id));
+          const mergedUserReports = [...localOnly, ...fromDb];
+
+          writeJSON(USER_REPORTS_KEY, mergedUserReports);
+
+          // Combine with seed reports
+          const allUserIds = new Set(mergedUserReports.map((r) => r.id));
+          const seeds = SEED_REPORTS.filter((s) => !allUserIds.has(s.id));
+          setReports([...mergedUserReports, ...seeds]);
+        }
+      } catch (err) {
+        console.warn("Supabase reports sync fallback to local:", err);
+      } finally {
+        setIsSyncing(false);
+      }
+    }
+    fetchSupabaseReports();
+  }, []);
+
+  const create = async (data) => {
+    const newReport = {
+      ...data,
+      id: "rep-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      reportDate: today(0),
+      status: "searching",
+    };
+
+    // 1. Instantly update React state so user immediately sees it
+    setReports((prev) => [newReport, ...prev.filter((r) => r.id !== newReport.id)]);
+
+    // 2. Instantly persist to localStorage
+    try {
+      const existing = readJSON(USER_REPORTS_KEY, []);
+      const updated = [newReport, ...existing.filter((r) => r.id !== newReport.id)];
+      writeJSON(USER_REPORTS_KEY, updated);
+    } catch (e) {
+      console.warn("Error saving report to localStorage:", e);
+    }
+
+    // 3. Persist to Supabase reports table
+    if (supabase) {
+      try {
+        const payload = mapToSupabase(newReport);
+        const { error } = await supabase.from("reports").insert([payload]);
+        if (error) {
+          console.warn("Supabase report insert warning:", error.message);
+        }
+      } catch (err) {
+        console.warn("Supabase report insert error:", err);
+      }
+    }
+
+    return newReport;
+  };
+
+  const update = async (id, data) => {
     setReports((prev) =>
       prev.map((item) => (item.id === id ? { ...item, ...data } : item))
     );
 
-  const remove = (id) =>
+    const existing = readJSON(USER_REPORTS_KEY, []);
+    const updated = existing.map((r) => (r.id === id ? { ...r, ...data } : r));
+    writeJSON(USER_REPORTS_KEY, updated);
+
+    if (supabase) {
+      try {
+        const payload = mapToSupabase({ id, ...data });
+        delete payload.id;
+        await supabase.from("reports").update(payload).eq("id", id);
+      } catch (err) {
+        console.warn("Supabase report update error:", err);
+      }
+    }
+  };
+
+  const remove = async (id) => {
     setReports((prev) => prev.filter((item) => item.id !== id));
 
-  return { reports, create, update, remove };
+    const existing = readJSON(USER_REPORTS_KEY, []);
+    writeJSON(USER_REPORTS_KEY, existing.filter((r) => r.id !== id));
+
+    if (supabase) {
+      try {
+        await supabase.from("reports").delete().eq("id", id);
+      } catch (err) {
+        console.warn("Supabase report delete error:", err);
+      }
+    }
+  };
+
+  return { reports, create, update, remove, isSyncing };
 }

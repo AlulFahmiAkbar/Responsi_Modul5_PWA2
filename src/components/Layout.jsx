@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useLocation, Link } from "react-router-dom";
-import { useProfile } from "../contexts/ProfileContext";
+import { useProfile, DEFAULT_AVATAR } from "../contexts/ProfileContext";
 import {
   TemuBarangLogo,
   IconHome,
@@ -34,7 +34,7 @@ export default function Layout() {
               {/* Profile Avatar */}
               <Link to="/profil" className="tb-avatar-btn" aria-label="Profil Mahasiswa">
                 <img
-                  src={profile?.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80"}
+                  src={profile?.avatar || DEFAULT_AVATAR}
                   alt={profile?.nama || "Profil"}
                   className="tb-avatar-img"
                 />

@@ -14,7 +14,7 @@ import {
   IconX,
 } from "../components/Icons";
 
-function toDataUrl(file, max = 500) {
+function toDataUrl(file, max = 400) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (readerEvent) => {
@@ -22,11 +22,11 @@ function toDataUrl(file, max = 500) {
       img.onload = () => {
         const scale = Math.min(1, max / Math.max(img.width, img.height));
         const canvas = document.createElement("canvas");
-        canvas.width = img.width * scale;
-        canvas.height = img.height * scale;
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
         const ctx = canvas.getContext("2d");
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/jpeg", 0.85));
+        resolve(canvas.toDataURL("image/jpeg", 0.75));
       };
       img.onerror = reject;
       img.src = readerEvent.target.result;
